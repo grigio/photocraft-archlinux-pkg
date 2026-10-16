@@ -38,6 +38,17 @@ permissions:
 # context is not available to `jobs.<id>.container`.
 
 jobs:
+  # Publishing a release from this repository re-triggers this workflow (that is
+  # what `release: published` means), and the build matrix then resolves to
+  # empty. GitHub reports a run in which every job ended up doing nothing as a
+  # failure, so this job always does a little work to make those runs report
+  # what they are.
+  keepalive:
+    name: Check trigger
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "trigger is ${{ github.event_name }}"
+
   # Resolve the build matrix so that both the automatic and the manual trigger
   # feed the same downstream job.
   prepare:
