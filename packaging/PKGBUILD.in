@@ -129,14 +129,23 @@ build() {
 	export PHOTOCRAFT_BUILD_DATE="$SOURCE_DATE"
 	echo "PHOTOCRAFT_BUILD_SHA=${PHOTOCRAFT_BUILD_SHA} PHOTOCRAFT_BUILD_DATE=${PHOTOCRAFT_BUILD_DATE}"
 
-	# Same target set and features as upstream's packaging/linux/package.sh: the
-	# GUI app, the headless CLI, and the optional HEIC/HEIF decoder. heif is pure
-	# Rust (heic-rs), so it needs no system library.
+	# Same target set as upstream's packaging/linux/package.sh: the GUI app and
+	# the headless CLI.
+	#
+	# The HEIC/HEIF decoder is an optional feature that does not exist in the
+	# older tags (it was added in v0.5.0), so it is enabled only where the
+	# manifest declares it. heic-rs is pure Rust, so it needs no system library.
 	#
 	# -j2: codegen-units=1 makes each rustc process memory-hungry, and the
 	# default parallelism (nproc) OOMs a 4-core runner.
+	features=()
+	if grep -q '^heif *=' apps/photocraft/Cargo.toml; then
+		features=(--features heif)
+	fi
+	echo "building photocraft ${features[*]:-without optional features}"
+
 	cargo build --release --locked -j2 \
-		-p photocraft -p photocraft-cli --features heif
+		-p photocraft -p photocraft-cli ${features[@]+"${features[@]}"}
 }
 
 # Sources are staged by prepare(), so there is nothing to extract.
