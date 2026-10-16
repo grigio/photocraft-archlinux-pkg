@@ -121,6 +121,14 @@ build() {
 	export RUSTFLAGS="${RUSTFLAGS//-C debuginfo=2/}"
 	echo "RUSTFLAGS='${RUSTFLAGS}' CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG"
 
+	# crates/engine/src/build_info.rs reads these with option_env!(), so they
+	# have to be in the environment while rustc runs -- exporting them is not
+	# enough, they must be exported here rather than relying on prepare().
+	# Without them `photocraft --version` reports itself as a "dev build".
+	export PHOTOCRAFT_BUILD_SHA="$upstream_commit"
+	export PHOTOCRAFT_BUILD_DATE="$SOURCE_DATE"
+	echo "PHOTOCRAFT_BUILD_SHA=${PHOTOCRAFT_BUILD_SHA} PHOTOCRAFT_BUILD_DATE=${PHOTOCRAFT_BUILD_DATE}"
+
 	# Same target set and features as upstream's packaging/linux/package.sh: the
 	# GUI app, the headless CLI, and the optional HEIC/HEIF decoder. heif is pure
 	# Rust (heic-rs), so it needs no system library.
