@@ -145,6 +145,7 @@ package() {
 		"$pkgdir/usr/share/mime/packages/$app_id.xml"
 
 	# AppStream metadata ships as a template upstream; fill in its placeholders.
+	install -d "$pkgdir/usr/share/metainfo"
 	sed -e "s/@VERSION@/$pkgver/g" -e "s/@DATE@/$SOURCE_DATE/g" \
 		"packaging/linux/$app_id.metainfo.xml.in" \
 		>"$pkgdir/usr/share/metainfo/$app_id.metainfo.xml"
