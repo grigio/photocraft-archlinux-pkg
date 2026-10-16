@@ -1,30 +1,32 @@
 name: Build Arch packages
 
-# Every new tag release of upstream automatically produces local pacman
-# packages. `release: published` is the key trigger: it fires the moment a
-# maintainer publishes a release (which is how upstream's own tag releases are
-# cut), so no configuration is needed for future versions.
+# Produces an Arch package for every upstream PhotoCraft release tag from v0.9.0
+# onwards, and publishes it as a GitHub release in this repository.
 #
-# The workflow_dispatch trigger is for backfilling tags that predate this repo
-# or for re-running a build.
+# How upstream releases are noticed: GitHub Actions has NO cross-repository
+# trigger -- `on: release` only fires for releases in the workflow's *own*
+# repository, so it cannot be used to react to storyteller/photocraft releases.
+# The only automatic mechanism available is therefore the daily schedule, which
+# polls upstream and builds any tag that is missing here. Expect up to ~24h
+# between an upstream release and the package appearing.
+#
+# workflow_dispatch builds or re-runs on demand.
 on:
-  release:
-    types: [published]
-  # Daily sweep for upstream tags that were missed (see the schedule branch of
-  # the prepare job). GitHub queues these on UTC, so the run may start a little
-  # after the hour.
+  # Daily sweep for upstream tags that have not been packaged here yet (see the
+  # schedule branch of the prepare job). GitHub queues these on UTC, so the run
+  # may start a little after the hour.
   schedule:
     - cron: '17 6 * * *'
   workflow_dispatch:
     inputs:
       tags:
-        description: 'Tags to build (one per line). Ignored on release events.'
+        description: 'Tags to build (one per line)'
         type: string
-        # Only v0.9.0 and newer. Newer tags arrive automatically through the
-        # `release: published` trigger, so this list is only for re-running or
-        # backfilling. Older tags (<= v0.8.2) do build, but their Cargo.toml
-        # versions and license-file layout predate the current upstream
-        # conventions, so they are not part of the supported set.
+        # Only v0.9.0 and newer. New tags are picked up by the schedule above,
+        # so this list is only for re-running or backfilling. Older tags
+        # (<= v0.8.2) do build, but their Cargo.toml versions and license-file
+        # layout predate the current upstream conventions, so they are not part
+        # of the supported set.
         default: |
           v0.9.0
       arches:
@@ -55,8 +57,6 @@ jobs:
       - id: resolve
         env:
           EVENT_NAME: ${{ github.event_name }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_URL: ${{ github.event.release.html_url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
           INPUT_TAGS: ${{ inputs.tags }}
@@ -64,25 +64,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "$EVENT_NAME" = "release" ]; then
-            # This workflow lives in *this* repository, and its publish job
-            # creates releases here. Reacting to those too would loop forever,
-            # so only releases coming from upstream count.
-            case "$RELEASE_URL" in
-              https://github.com/storytold/photocraft/releases/*) ;;
-              *)
-                echo "release '$RELEASE_TAG' is not from upstream ($RELEASE_URL) -- ignoring"
-                tags=""
-                arches=""
-                ;;
-            esac
-            if [ -n "$tags" ]; then
-              # Release events build the native architecture only. Cross
-              # architectures are opt-in because this workspace is large enough
-              # that an emulated release build costs many times a native one.
-              arches="x86_64"
-            fi
-          elif [ "$EVENT_NAME" = "schedule" ]; then
+          if [ "$EVENT_NAME" = "schedule" ]; then
             # Daily sweep: every published upstream release from v0.9.0 onwards
             # that this repo has not packaged yet. Anything already released
             # here is skipped, so the sweep is idempotent and re-running it
@@ -111,9 +93,9 @@ jobs:
           tags=$(printf '%s\n' $tags | sed '/^$/d' | sort -u -V)
           arches=$(printf '%s\n' $arches | sed '/^$/d' | sort -u)
 
-          # An empty tag list is legitimate (a release from this repository);
-          # it yields an empty matrix, so the build and publish jobs are simply
-          # skipped instead of failing the run.
+          # An empty tag list is legitimate: the daily sweep finds nothing to do
+          # whenever everything is already packaged. The build, publish and
+          # index jobs skip themselves on an empty matrix instead of failing.
           if [ -n "$tags" ]; then
             [ -n "$arches" ] || { echo "no architectures to build" >&2; exit 1; }
             echo "tags:"

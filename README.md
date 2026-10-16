@@ -6,7 +6,8 @@ Upstream is not on Arch Linux and ships no Arch package, so this repo repackages
 
 ## How it works
 
-- `.github/workflows/build.yml` triggers on `release: published` upstream, so a new `vX.Y.Z` release produces packages with no changes needed here. Each tag then gets its own GitHub release in this repository with the package attached.
+- `.github/workflows/build.yml` polls upstream on a daily schedule and builds every published release tag from **v0.9.0** onwards that is not packaged here yet. Each tag gets its own GitHub release in this repository with the package attached.
+- GitHub Actions has no cross-repository trigger (`on: release` only fires for releases in the workflow's own repo), so detection is polling, not event-driven: allow up to ~24h between an upstream release and the package appearing. `workflow_dispatch` builds a specific tag immediately.
 - `workflow_dispatch` backfills existing tags, lets you pick architectures, and can re-run a build.
 - A daily schedule (`cron: '17 6 * * *'`) sweeps upstream for any published release from v0.9.0 onwards that has not been packaged here yet. It skips tags already released in this repo, so it is idempotent and normally does nothing. The `release` trigger remains the fast path.
 - One job per (tag × architecture) in an official `archlinux:base-devel` container; `aarch64`/`riscv64` run under QEMU.
