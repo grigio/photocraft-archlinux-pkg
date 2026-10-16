@@ -144,8 +144,11 @@ jobs:
           id -u builder >/dev/null 2>&1 || useradd -m -u 1000 builder
           mkdir -p /repo/out /cargo
           # The checkout lands in the job's workspace; hand it to the builder
-          # user so makepkg can work unprivileged.
-          chown -R builder:builder "${{ github.workspace }}" /repo /cargo
+          # user so makepkg can work unprivileged. Note this must be the shell
+          # variable $GITHUB_WORKSPACE, not the github.workspace context: inside
+          # a container job the context reports the host path, which does not
+          # exist in the container.
+          chown -R builder:builder "$GITHUB_WORKSPACE" /repo /cargo
           printenv | sort > /tmp/build-env.txt
           echo "container image: $(pacman -Q archlinux 2>/dev/null || echo unknown)" >> /tmp/build-env.txt
 
@@ -155,14 +158,13 @@ jobs:
         env:
           TAG: ${{ matrix.tag }}
           ARCH: ${{ matrix.arch }}
-          WORKSPACE: ${{ github.workspace }}
         run: |
           set -uo pipefail
 
           # Run as an unprivileged user; makepkg uses fakeroot internally.
           # Exit code 2 means upstream has no asset for this tag/arch pair
           # (e.g. riscv64 before v0.7.0), which is not a failure.
-          su builder -c "cd '$WORKSPACE' && REPO_DIR=/repo/out CARGO_HOME=/cargo \
+          su builder -c "cd '$GITHUB_WORKSPACE' && REPO_DIR=/repo/out CARGO_HOME=/cargo \
             ./packaging/build-package.sh '$TAG' '$ARCH'" >/tmp/build.log 2>&1
           rc=$?
 
