@@ -90,16 +90,15 @@ prepare() {
 build() {
 	cd "$srcdir/photocraft-$pkgver"
 
-	# Upstream keeps its version in exactly one place, and it must agree with the
-	# tag this package claims to build. This also catches a tag pointing at a
-	# commit whose Cargo.toml disagrees.
-	local declared
+	# Upstream keeps its version in exactly one place. It usually agrees with the
+	# tag, but not always: the v0.1.1-rc.* tags still declare 0.1.0, so the tag
+	# is authoritative and a mismatch is reported rather than fatal.
 	declared=$(awk '
 		/^\[/ { in_pkg = ($0 == "[workspace.package]"); next }
 		in_pkg && $1 == "version" { gsub(/[" ]/, "", $3); print $3; exit }
 	' Cargo.toml)
 	if [ "$declared" != "$pkgver" ]; then
-		error "Cargo.toml declares version '$declared' but this package is $pkgver"
+		echo "WARNING: tag says $pkgver but Cargo.toml declares $declared (packaging $pkgver anyway)"
 	fi
 
 	# Keep cargo's state inside the build tree instead of $HOME. Both may be
@@ -173,12 +172,19 @@ package() {
 	install -d "$pkgdir/usr/share/icons"
 	cp -R assets/app-icon/hicolor "$pkgdir/usr/share/icons/"
 
-	install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/photocraft/LICENSE-MIT"
-	install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/photocraft/LICENSE-APACHE"
-	install -Dm644 ATTRIBUTION.md "$pkgdir/usr/share/licenses/photocraft/ATTRIBUTION.md"
-	# NOTICE carries the third-party attributions the bundled dependencies require.
-	if [ -f NOTICE ]; then
-		install -Dm644 NOTICE "$pkgdir/usr/share/licenses/photocraft/NOTICE"
+	# The license texts only exist from v0.2.0 on; earlier tags ship none at
+	# the repository root even though they carry the same dual MIT/Apache-2.0
+	# licensing, so each file is installed only when it is there.
+	local f
+	for f in LICENSE-MIT LICENSE-APACHE NOTICE ATTRIBUTION.md; do
+		if [ -f "$f" ]; then
+			install -Dm644 "$f" "$pkgdir/usr/share/licenses/photocraft/$f"
+		fi
+	done
+	# Icon licensing predates the root license files and travels with the icons.
+	if [ -f assets/app-icon/LICENSE.txt ]; then
+		install -Dm644 assets/app-icon/LICENSE.txt \
+			"$pkgdir/usr/share/licenses/photocraft/app-icon-LICENSE.txt"
 	fi
 }
 
