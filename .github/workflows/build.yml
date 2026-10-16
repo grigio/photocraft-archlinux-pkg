@@ -51,18 +51,30 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
           INPUT_TAGS: ${{ inputs.tags }}
           INPUT_ARCHES: ${{ inputs.arches }}
         run: |
           set -euo pipefail
 
           if [ "$EVENT_NAME" = "release" ]; then
-            # Only react to upstream releases, not to releases of this repo.
-            tags="$RELEASE_TAG"
-            # Release events build the native architecture only. Cross
-            # architectures are opt-in because this workspace is large enough
-            # that an emulated release build costs many times a native one.
-            arches="x86_64"
+            # This workflow lives in *this* repository, and its publish job
+            # creates releases here. Reacting to those too would loop forever,
+            # so only releases coming from upstream count.
+            case "$RELEASE_URL" in
+              https://github.com/storytold/photocraft/releases/*) ;;
+              *)
+                echo "release '$RELEASE_TAG' is not from upstream ($RELEASE_URL) -- ignoring"
+                tags=""
+                arches=""
+                ;;
+            esac
+            if [ -n "$tags" ]; then
+              # Release events build the native architecture only. Cross
+              # architectures are opt-in because this workspace is large enough
+              # that an emulated release build costs many times a native one.
+              arches="x86_64"
+            fi
           else
             tags="$INPUT_TAGS"
             arches="$INPUT_ARCHES"
@@ -72,13 +84,18 @@ jobs:
           tags=$(printf '%s\n' $tags | sed '/^$/d' | sort -u -V)
           arches=$(printf '%s\n' $arches | sed '/^$/d' | sort -u)
 
-          [ -n "$tags" ] || { echo "no tags to build" >&2; exit 1; }
-          [ -n "$arches" ] || { echo "no architectures to build" >&2; exit 1; }
-
-          echo "tags:"
-          printf '%s\n' $tags
-          echo "arches:"
-          printf '%s\n' $arches
+          # An empty tag list is legitimate (a release from this repository);
+          # it yields an empty matrix, so the build and publish jobs are simply
+          # skipped instead of failing the run.
+          if [ -n "$tags" ]; then
+            [ -n "$arches" ] || { echo "no architectures to build" >&2; exit 1; }
+            echo "tags:"
+            printf '%s\n' $tags
+            echo "arches:"
+            printf '%s\n' $arches
+          else
+            echo "nothing to build"
+          fi
 
           # Compact output: $GITHUB_OUTPUT takes one key=value per line, so
           # pretty-printed JSON would be rejected.
