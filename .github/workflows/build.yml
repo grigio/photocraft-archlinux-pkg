@@ -250,7 +250,8 @@ jobs:
             arch=${arch%/}
             arch=${arch##*/}
             echo "::group::repo-add $arch"
-            repo-add -v -f "/repo/$arch/photocraft.db.tar.gz" "/repo/$arch/"*.pkg.tar.zst
+            # repo-add takes no -f, and its -v means "verify signature", not "verbose".
+            repo-add --nocolor "/repo/$arch/photocraft.db.tar.gz" "/repo/$arch/"*.pkg.tar.zst
             echo "::endgroup::"
           done
 
