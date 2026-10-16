@@ -18,7 +18,7 @@ url='https://github.com/storytold/photocraft'
 license=('MIT' 'Apache-2.0')
 # The release profile builds without debuginfo, so a -debug split package would
 # be empty; package() strips the binaries itself.
-options=('!dbg')
+options=('!debug')
 
 # Tags are identified by commit sha rather than by a tarball checksum: GitHub's
 # auto-generated source archives are not guaranteed byte-stable, so prepare()
