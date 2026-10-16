@@ -235,18 +235,46 @@ jobs:
           # the architecture can be recovered from the name.
           for pkg in "${pkgs[@]}"; do
             name=$(basename "$pkg")
-            arch=${name%.pkg.tar.zst}
-            arch=${arch##*-}
+            stem=${name%.pkg.tar.zst}
+            arch=${stem##*-}
             mkdir -p "/repo/$arch"
             mv "$pkg" "/repo/$arch/$name"
+
+            # One database per version. repo-add *replaces* the entry for a
+            # package name when it sees a newer version ("Removing existing
+            # entry ..."), so a single photocraft.db can only ever describe one
+            # version. Per-version databases are what keep every tag
+            # installable; photocraft.db below holds just the newest.
+            ver=${stem#photocraft-}
+            ver=${ver%-$arch}
+            repo-add --nocolor "/repo/$arch/photocraft-${ver}.db.tar.gz" \
+              "/repo/$arch/$name"
           done
 
-          for arch in /repo/*/; do
-            arch=${arch%/}
+          # Default database per architecture: the highest version there, so a
+          # plain `pacman -S photocraft` installs the newest release. Ranking
+          # uses pacman's own vercmp rather than sort -V, which mis-orders
+          # "0.1.1rc.5" against "0.1.1".
+          for archdir in /repo/*/; do
+            arch=${archdir%/}
             arch=${arch##*/}
-            echo "::group::repo-add $arch"
-            # repo-add takes no -f, and its -v means "verify signature", not "verbose".
-            repo-add --nocolor "/repo/$arch/photocraft.db.tar.gz" "/repo/$arch/"*.pkg.tar.zst
+
+            newest_ver=
+            newest_pkg=
+            for pkg in "/repo/$arch"/photocraft-*.pkg.tar.zst; do
+              [ -e "$pkg" ] || continue
+              stem=$(basename "$pkg" .pkg.tar.zst)
+              ver=${stem#photocraft-}
+              ver=${ver%-$arch}
+              if [ -z "$newest_ver" ] ||
+                [ "$(vercmp "$ver" "$newest_ver")" -gt 0 ]; then
+                newest_ver=$ver
+                newest_pkg=$pkg
+              fi
+            done
+
+            echo "::group::default repo-add for $arch (newest: ${newest_ver})"
+            repo-add --nocolor "/repo/$arch/photocraft.db.tar.gz" "$newest_pkg"
             echo "::endgroup::"
           done
 
