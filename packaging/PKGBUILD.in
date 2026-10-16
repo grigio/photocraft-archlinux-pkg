@@ -104,19 +104,26 @@ build() {
 	export CARGO_HOME="${CARGO_HOME:-$srcdir/cargo-home}"
 	export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$srcdir/target}"
 
-	# makepkg enables debuginfo in the release profile when gdb is installed,
-	# which drags gdb in as a build dependency here. debug info roughly doubles
-	# the memory ui-egui needs, and with codegen-units=1 a single rustc already
-	# runs to several GB -- enough to get OOM-killed on a CI runner. Upstream's
-	# own release profile carries no debuginfo either.
+	# makepkg turns on debuginfo when gdb is installed -- and the rust package
+	# pulls gdb in, so it always is here. It does this two ways: by exporting
+	# CARGO_PROFILE_RELEASE_DEBUG, and by appending "-C debuginfo=2" to
+	# RUSTFLAGS. The latter lands on the rustc command line and overrides the
+	# profile setting, so it has to be stripped explicitly.
+	#
+	# This matters because ui-egui at opt-level=3 with codegen-units=1 is the
+	# peak-memory unit of the workspace, and debug info is roughly what
+	# doubles it into an OOM kill on a CI runner. Upstream's own release
+	# profile carries no debuginfo.
 	export CARGO_PROFILE_RELEASE_DEBUG=false
+	export RUSTFLAGS="${RUSTFLAGS//-C debuginfo=2/}"
+	echo "RUSTFLAGS='${RUSTFLAGS}' CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG"
 
 	# Same target set and features as upstream's packaging/linux/package.sh: the
 	# GUI app, the headless CLI, and the optional HEIC/HEIF decoder. heif is pure
 	# Rust (heic-rs), so it needs no system library.
 	#
-	# -j2: the release profile uses codegen-units=1, so parallel rustc processes
-	# are the peak-memory driver; the default parallelism OOMs a 4-core runner.
+	# -j2: codegen-units=1 makes each rustc process memory-hungry, and the
+	# default parallelism (nproc) OOMs a 4-core runner.
 	cargo build --release --locked -j2 \
 		-p photocraft -p photocraft-cli --features heif
 }
