@@ -160,16 +160,19 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           set -uo pipefail
+          # GitHub runs steps with `bash -e`, which would abort on a non-zero
+          # exit before the log could be shown. Turn it off around the build.
+          set +e
 
           # Run as an unprivileged user; makepkg uses fakeroot internally.
-          # Exit code 2 means upstream has no asset for this tag/arch pair
-          # (e.g. riscv64 before v0.7.0), which is not a failure.
+          # Exit code 2 means upstream has no commit for this tag, which is
+          # not a failure. Stream to the job log as well as a file, so a
+          # failure is never silent.
           su builder -c "cd '$GITHUB_WORKSPACE' && REPO_DIR=/repo/out CARGO_HOME=/cargo \
-            ./packaging/build-package.sh '$TAG' '$ARCH'" >/tmp/build.log 2>&1
-          rc=$?
+            ./packaging/build-package.sh '$TAG' '$ARCH'" 2>&1 | tee /tmp/build.log
+          rc=${PIPESTATUS[0]}
 
-          cat /tmp/build.log
-
+          set -e
           if [ "$rc" -eq 2 ]; then
             echo "::notice::upstream publishes no $ARCH asset for $TAG -- skipping"
             echo "skipped=true" >>"$GITHUB_OUTPUT"
