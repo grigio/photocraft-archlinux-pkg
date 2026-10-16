@@ -85,7 +85,9 @@ jobs:
           echo "arches:"
           printf '%s\n' $arches
 
-          json() { printf '%s' "$1" | jq -R -s 'split("\n") | map(select(length > 0))'; }
+          # Compact output: $GITHUB_OUTPUT takes one key=value per line, so
+          # pretty-printed JSON would be rejected.
+          json() { printf '%s' "$1" | jq -R -s -c 'split("\n") | map(select(length > 0))'; }
 
           {
             echo "tags=$(json "$tags")"
