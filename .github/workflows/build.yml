@@ -10,6 +10,10 @@ name: Build Arch packages
 on:
   release:
     types: [published]
+    # Releases in this repository are tagged pkg/<upstream-tag> and must not
+    # trigger this workflow again -- see the publish job.
+    tags-ignore:
+      - 'pkg/**'
   workflow_dispatch:
     inputs:
       tags:
@@ -38,17 +42,6 @@ permissions:
 # context is not available to `jobs.<id>.container`.
 
 jobs:
-  # Publishing a release from this repository re-triggers this workflow (that is
-  # what `release: published` means), and the build matrix then resolves to
-  # empty. GitHub reports a run in which every job ended up doing nothing as a
-  # failure, so this job always does a little work to make those runs report
-  # what they are.
-  keepalive:
-    name: Check trigger
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "trigger is ${{ github.event_name }}"
-
   # Resolve the build matrix so that both the automatic and the manual trigger
   # feed the same downstream job.
   prepare:
@@ -288,13 +281,20 @@ jobs:
             echo '```'
             echo
             echo "Or add the [repository](../../README.md#installing) and run \`sudo pacman -S photocraft\`."
+            echo
+            echo "Built from source on GitHub Actions; see the [run log](../../actions)."
           } >"$notes"
 
           echo "publishing $TAG ($pkgver, $ARCH)"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$pkg" "${pkg}.sha256" --clobber
+          # The git tag is pkg/<upstream tag>, not the upstream tag itself: the
+          # workflow listens for `release: published`, so tagging this release
+          # v0.9.0 would make it trigger a rebuild of v0.9.0, forever. The
+          # trigger's tags-ignore excludes this prefix.
+          release_tag="pkg/$TAG"
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            gh release upload "$release_tag" "$pkg" "${pkg}.sha256" --clobber
           else
-            gh release create "$TAG" "$pkg" "${pkg}.sha256" \
+            gh release create "$release_tag" "$pkg" "${pkg}.sha256" \
               --title "PhotoCraft ${TAG}" \
               --notes-file "$notes"
           fi
