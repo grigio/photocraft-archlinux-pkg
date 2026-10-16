@@ -142,6 +142,10 @@ jobs:
           pacman -S --noconfirm --needed base-devel fakeroot curl jq
           # Image ships a pre-made user only for some variants; be explicit.
           id -u builder >/dev/null 2>&1 || useradd -m -u 1000 builder
+          # makepkg --syncdeps installs the PKGBUILD's makedepends through
+          # sudo, which would otherwise stop for a password prompt.
+          printf 'builder ALL=(ALL) NOPASSWD: ALL\n' >/etc/sudoers.d/builder
+          chmod 0440 /etc/sudoers.d/builder
           mkdir -p /repo/out /cargo
           # The checkout lands in the job's workspace; hand it to the builder
           # user so makepkg can work unprivileged. Note this must be the shell
