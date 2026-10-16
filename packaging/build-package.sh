@@ -65,8 +65,7 @@ sed \
 	-e "s|@COMMIT@|${commit}|g" \
 	"$PKGBUILD_TPL" >PKGBUILD
 
-makepkg --syncdeps --noconfirm --noprogressbar --cleanbuild --clean \
-	--logfile=make.log
+makepkg --syncdeps --noconfirm --noprogressbar --cleanbuild --clean
 
 pkg=$(ls -1 photocraft-*.pkg.tar.zst)
 echo ">> built ${pkg}"
