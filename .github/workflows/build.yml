@@ -124,6 +124,9 @@ jobs:
   build:
     name: ${{ matrix.tag }} / ${{ matrix.arch }}
     needs: [prepare, qemu]
+    # An empty matrix is reported by GitHub as a failed run, which would mark
+    # every ignored self-triggered release red. Skip the job outright instead.
+    if: needs.prepare.outputs.tags != '[]'
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
@@ -226,6 +229,7 @@ jobs:
   publish:
     name: Release ${{ matrix.tag }} / ${{ matrix.arch }}
     needs: [prepare, build]
+    if: needs.prepare.outputs.tags != '[]'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -312,6 +316,7 @@ jobs:
   index:
     name: Build local repo
     needs: [prepare, build]
+    if: needs.prepare.outputs.tags != '[]'
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
