@@ -199,8 +199,85 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+  # Attach the built package to a GitHub release in this repository, one per
+  # upstream tag, so the packages can be downloaded straight from the Releases
+  # page.
+  publish:
+    name: Release ${{ matrix.tag }} / ${{ matrix.arch }}
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(needs.prepare.outputs.tags) }}
+        arch: ${{ fromJSON(needs.prepare.outputs.arches) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: photocraft-${{ matrix.tag }}-${{ matrix.arch }}
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ matrix.tag }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+
+          pkg=$(ls -1 photocraft-*-1-"$ARCH".pkg.tar.zst | head -1)
+          pkgver=$(basename "$pkg" .pkg.tar.zst)
+          pkgver=${pkgver#photocraft-}
+          pkgver=${pkgver%-$ARCH}   # strip "-<arch>", keep "<pkgver>-<pkgrel>"
+
+          # Supported range is v0.9.0 and newer. Anything older is skipped
+          # rather than published.
+          if [ "$(printf '%s\n%s\n' 0.9.0 "$pkgver" | sort -V | head -1)" != 0.9.0 ]; then
+            echo "::notice::$pkgver is older than 0.9.0 -- not publishing"
+            exit 0
+          fi
+
+          sha256sum "$pkg" >"${pkg}.sha256"
+          notes=$(mktemp)
+          {
+            echo "Arch Linux package for [PhotoCraft](https://github.com/storytold/photocraft) \`$TAG\`, compiled from source."
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| package | \`$(basename "$pkg")\` |"
+            echo "| version | \`$pkgver\` |"
+            echo "| architecture | \`$ARCH\` |"
+            echo "| source tag | [\`$TAG\`](https://github.com/storytold/photocraft/releases/tag/$TAG) |"
+            echo
+            echo "### Install"
+            echo
+            echo '```bash'
+            echo "sudo pacman -U ${pkg}"
+            echo '```'
+            echo
+            echo "Or add the [repository](../../README.md#installing) and run \`sudo pacman -S photocraft\`."
+          } >"$notes"
+
+          echo "publishing $TAG ($pkgver, $ARCH)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$pkg" "${pkg}.sha256" --clobber
+          else
+            gh release create "$TAG" "$pkg" "${pkg}.sha256" \
+              --title "PhotoCraft ${TAG}" \
+              --notes-file "$notes"
+          fi
+
+      - name: Upload build environment snapshot
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: env-${{ matrix.tag }}-${{ matrix.arch }}
+          path: env.txt
+        continue-on-error: true
+
   # Collect every produced .pkg.tar.zst and turn each architecture's set into a
-  # signed-able pacman repository database.
+  # pacman repository database.
   index:
     name: Build local repo
     needs: [prepare, build]
