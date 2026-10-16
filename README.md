@@ -6,8 +6,8 @@ Upstream is not on Arch Linux and ships no Arch package, so this repo repackages
 
 ## How it works
 
-- `.github/workflows/build.yml` triggers on `release: published` upstream, so a new `vX.Y.Z` release produces packages with no changes needed here.
-- `workflow_dispatch` backfills existing tags and lets you pick architectures.
+- `.github/workflows/build.yml` triggers on `release: published` upstream, so a new `vX.Y.Z` release produces packages with no changes needed here. Each tag then gets its own GitHub release in this repository with the package attached.
+- `workflow_dispatch` backfills existing tags, lets you pick architectures, and can re-run a build.
 - One job per (tag × architecture) in an official `archlinux:base-devel` container; `aarch64`/`riscv64` run under QEMU.
 - The tarball's sha256 is read from upstream's own `SHA256SUMS.txt` at build time, so every package is checksum-verified and any future tag works unchanged.
 - Each architecture's packages are indexed with `repo-add` into a downloadable repository artifact.
@@ -26,13 +26,24 @@ Consequences worth knowing:
 
 ## Installing
 
-Download the `photocraft-arch-repo` artifact from a workflow run and unzip it. It contains one directory per architecture:
+### From a GitHub release
+
+Every upstream tag from **v0.9.0** onwards gets its own release on this repository's [Releases page](https://github.com/grigio/photocraft-archlinux-pkg/releases), carrying the package and a `.sha256`:
+
+```bash
+gh release download v0.9.0 --repo grigio/photocraft-archlinux-pkg
+sha256sum -c photocraft-0.9.0-1-x86_64.pkg.tar.zst.sha256
+sudo pacman -U photocraft-0.9.0-1-x86_64.pkg.tar.zst
+```
+
+### From the pacman repository
+
+Each run also publishes a repository artifact. Download `photocraft-arch-repo` from a workflow run and unzip it; it contains one directory per architecture:
 
 ```
 repo/x86_64/photocraft-0.9.0-1-x86_64.pkg.tar.zst
 repo/x86_64/photocraft.db            # newest version only
 repo/x86_64/photocraft-0.9.0-1.db    # one database per built version
-repo/x86_64/photocraft-0.8.2-1.db
 ...
 ```
 
