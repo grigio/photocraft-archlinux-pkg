@@ -221,6 +221,9 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          # gh infers the repository from the local git checkout; this job has
+          # none, so it has to be told explicitly.
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ matrix.tag }}
           ARCH: ${{ matrix.arch }}
         run: |
