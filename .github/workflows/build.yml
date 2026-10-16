@@ -10,6 +10,11 @@ name: Build Arch packages
 on:
   release:
     types: [published]
+  # Daily sweep for upstream tags that were missed (see the schedule branch of
+  # the prepare job). GitHub queues these on UTC, so the run may start a little
+  # after the hour.
+  schedule:
+    - cron: '17 6 * * *'
   workflow_dispatch:
     inputs:
       tags:
@@ -52,6 +57,8 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.event.release.tag_name }}
           RELEASE_URL: ${{ github.event.release.html_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
           INPUT_TAGS: ${{ inputs.tags }}
           INPUT_ARCHES: ${{ inputs.arches }}
         run: |
@@ -75,6 +82,26 @@ jobs:
               # that an emulated release build costs many times a native one.
               arches="x86_64"
             fi
+          elif [ "$EVENT_NAME" = "schedule" ]; then
+            # Daily sweep: every published upstream release from v0.9.0 onwards
+            # that this repo has not packaged yet. Anything already released
+            # here is skipped, so the sweep is idempotent and re-running it
+            # costs nothing.
+            upstream=$(gh api "repos/storytold/photocraft/releases?per_page=100" \
+              --paginate -q '.[] | select(.draft==false) | .tag_name')
+            done_tags=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+              --json tagName -q '.[].tagName')
+
+            tags=$(
+              while read -r t; do
+                [ -n "$t" ] || continue
+                # Supported range: v0.9.0 and newer.
+                [ "$(printf '%s\n%s\n' 0.9.0 "${t#v}" | sort -V | head -1)" = 0.9.0 ] || continue
+                printf '%s\n' "$done_tags" | grep -qxF "$t" && continue
+                printf '%s\n' "$t"
+              done <<<"$upstream"
+            )
+            arches="x86_64"
           else
             tags="$INPUT_TAGS"
             arches="$INPUT_ARCHES"
