@@ -67,7 +67,14 @@ sed \
 
 makepkg --syncdeps --noconfirm --noprogressbar --cleanbuild --clean
 
-pkg=$(ls -1 photocraft-*.pkg.tar.zst)
+# Match the real package only: a plain photocraft-*.pkg.tar.zst glob also picks
+# up the -debug split package if one is built.
+pkg=$(find . -maxdepth 1 -name "photocraft-*-1-${arch}.pkg.tar.zst" -print)
+if [ -z "$pkg" ]; then
+	echo "makepkg produced no photocraft package for ${arch}" >&2
+	exit 1
+fi
+pkg=${pkg#./}
 echo ">> built ${pkg}"
 
 install -Dm644 "$pkg" "${REPO_DIR}/${arch}/${pkg}"
