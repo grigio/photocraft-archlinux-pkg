@@ -36,11 +36,11 @@ on:
 permissions:
   contents: read
 
-env:
-  # Rolling image: always a current Arch userspace, which is what we want since
-  # the packages are consumed on a rolling system. Pin this to a dated tag
-  # (archlinux:base-devel:YYYYMMDD) if you need bit-reproducible output.
-  ARCH_IMAGE: archlinux:base-devel
+# NOTE: this is a rolling image (always a current Arch userspace, which is what
+# we want since the packages are consumed on a rolling system). Pin it to a
+# dated tag (archlinux:base-devel:YYYYMMDD) in both `container:` blocks below if
+# you need bit-reproducible output. A literal is required here because the `env`
+# context is not available to `jobs.<id>.container`.
 
 jobs:
   # Resolve the build matrix so that both the automatic and the manual trigger
@@ -108,7 +108,7 @@ jobs:
     needs: [prepare, qemu]
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.ARCH_IMAGE }}
+      image: archlinux:base-devel
     strategy:
       # One tag or architecture failing must not hide the others.
       fail-fast: false
@@ -200,7 +200,7 @@ jobs:
     needs: [prepare, build]
     runs-on: ubuntu-latest
     container:
-      image: ${{ env.ARCH_IMAGE }}
+      image: archlinux:base-devel
     steps:
       - name: Install pacman tooling
         run: pacman -Sy --noconfirm --needed pacman curl
