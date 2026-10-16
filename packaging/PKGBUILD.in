@@ -1,0 +1,157 @@
+# PKGBUILD template. Placeholders are substituted by packaging/build-package.sh
+# in CI before makepkg runs:
+#
+#   @TAG@     upstream git tag, e.g. v0.9.0
+#   @PKGVER@  pkgver derived from the tag, e.g. 0.9.0 (v0.1.1-rc.5 -> 0.1.1rc.5)
+#   @ARCH@    architecture, e.g. x86_64
+#   @PKGREL@  pkgrel
+#   @COMMIT@  upstream commit sha the tag points at, verified in prepare()
+#
+# The workspace is compiled from source. Upstream's prebuilt release tarballs are
+# not used.
+pkgname=photocraft
+pkgver=@PKGVER@
+pkgrel=@PKGREL@
+pkgdesc='Open-source native image editor written from scratch in pure Rust. Layers, masks, adjustment layers, layer styles, type and brushes; opens and saves layered PSD/PSB; 8/16/32-bit documents; GPU compositing via wgpu. Ships photocraft-cli, a headless converter.'
+arch=('@ARCH@')
+url='https://github.com/storytold/photocraft'
+license=('MIT' 'Apache-2.0')
+
+# Tags are identified by commit sha rather than by a tarball checksum: GitHub's
+# auto-generated source archives are not guaranteed byte-stable, so prepare()
+# clones the tag and verifies the commit instead.
+source=()
+b2sums=()
+
+# Build-time: rust/cargo (Arch folds cargo into the rust package, currently 1.99
+# which covers the workspace's rust-version 1.95 and edition 2024), plus the
+# native toolchain the dependency graph needs:
+#   clang      -- bindgen runs in pipewire-sys and libspa-sys, pulled in by xcap
+#                (a direct dependency of the photocraft binary for screen capture)
+#   libpipewire-- system_deps probe for libpipewire-0.3.pc + /usr/include/pipewire-0.3.
+#                The `pipewire` package ships neither; this split does.
+#   cmake      -- aws-lc-sys builds C code
+#   wayland    -- headers plus wayland-scanner, needed by smithay-client-toolkit
+#   git        -- the workspace has git dependencies (craft-libs, pinned revs)
+makedepends=('rust' 'clang' 'libpipewire' 'cmake' 'wayland' 'git')
+
+# The binaries declare only glibc, libm and libgcc_s as ELF NEEDED entries.
+# Everything else (X11/Wayland, xkbcommon, Vulkan/EGL) is resolved with dlopen()
+# at runtime, so ldd cannot detect it and these must be declared by hand. winit
+# loads libxkbcommon-x11 on X11 and panics without it.
+optdepends=(
+  'vulkan-icd-loader: Vulkan loader, used by the wgpu backend'
+  'mesa: GL/Vulkan GPU drivers (Intel/AMD)'
+  'libglvnd: EGL loader for GL rendering'
+  'libx11: X11 windowing backend'
+  'libxcb: X11 windowing backend'
+  'libx11-xcb: X11 windowing backend'
+  'libxcursor: X11 cursor handling'
+  'libxi: X11 input handling'
+  'libxkbcommon: keyboard layout support'
+  'libxkbcommon-x11: keyboard layout support on X11 (winit requires it)'
+  'wayland: native Wayland backend'
+  'pipewire: screen capture (PipeWire backend of xcap)'
+  'xdg-desktop-portal: file chooser and desktop portals'
+  'shared-mime-info: regenerates the MIME database after install'
+  'desktop-file-utils: regenerates the desktop database after install'
+)
+
+prepare() {
+	cd "$srcdir"
+
+	# Verify that the tag resolves to the commit this package was cut from.
+	# An annotated tag is peeled with ^{commit}.
+	git clone --quiet --no-checkout https://github.com/storytold/photocraft.git photocraft-src
+	git -C photocraft-src checkout --quiet "@TAG@^{commit}"
+
+	local actual
+	actual=$(git -C photocraft-src rev-parse HEAD)
+	if [ "$actual" != "@COMMIT@" ]; then
+		error "tag @TAG@ resolves to $actual, expected @COMMIT@"
+	fi
+
+	# Bake build provenance into the About box and --version output. SOURCE_DATE
+	# is the commit date rather than "today" so repeated builds of the same tag
+	# produce identical binaries.
+	upstream_commit=$actual
+	SOURCE_DATE=$(git -C photocraft-src show -s --format=%cs "$actual")
+	export upstream_commit SOURCE_DATE
+
+	# The clone is only needed to resolve and verify the tag; cargo uses its own
+	# git checkouts for the craft-libs dependencies.
+	rm -rf photocraft-src/.git
+	mv photocraft-src "photocraft-$pkgver"
+}
+
+build() {
+	cd "$srcdir/photocraft-$pkgver"
+
+	# Upstream keeps its version in exactly one place, and it must agree with the
+	# tag this package claims to build. This also catches a tag pointing at a
+	# commit whose Cargo.toml disagrees.
+	local declared
+	declared=$(awk '
+		/^\[/ { in_pkg = ($0 == "[workspace.package]"); next }
+		in_pkg && $1 == "version" { gsub(/[" ]/, "", $3); print $3; exit }
+	' Cargo.toml)
+	if [ "$declared" != "$pkgver" ]; then
+		error "Cargo.toml declares version '$declared' but this package is $pkgver"
+	fi
+
+	# Keep cargo's state inside the build tree instead of $HOME. Both paths may be
+	# overridden by the environment so CI can cache them across runs.
+	export CARGO_HOME="${CARGO_HOME:-$srcdir/cargo-home}"
+	export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$srcdir/target}"
+
+	# Same target set and features as upstream's packaging/linux/package.sh: the
+	# GUI app, the headless CLI, and the optional HEIC/HEIF decoder. heif is pure
+	# Rust (heic-rs), so it needs no system library.
+	cargo build --release --locked \
+		-p photocraft -p photocraft-cli --features heif
+}
+
+# Sources are staged by prepare(), so there is nothing to extract.
+package() {
+	cd "$srcdir/photocraft-$pkgver"
+
+	local bin="$CARGO_TARGET_DIR/release"
+	local app_id=ai.storyteller.photocraft
+
+	install -Dm755 "$bin/photocraft" "$pkgdir/usr/bin/photocraft"
+	install -Dm755 "$bin/photocraft-cli" "$pkgdir/usr/bin/photocraft-cli"
+	strip --strip-unneeded "$pkgdir/usr/bin/photocraft" "$pkgdir/usr/bin/photocraft-cli"
+
+	install -Dm644 "packaging/linux/$app_id.desktop" \
+		"$pkgdir/usr/share/applications/$app_id.desktop"
+	install -Dm644 "packaging/linux/$app_id.mime.xml" \
+		"$pkgdir/usr/share/mime/packages/$app_id.xml"
+
+	# AppStream metadata ships as a template upstream; fill in its placeholders.
+	sed -e "s/@VERSION@/$pkgver/g" -e "s/@DATE@/$SOURCE_DATE/g" \
+		"packaging/linux/$app_id.metainfo.xml.in" \
+		>"$pkgdir/usr/share/metainfo/$app_id.metainfo.xml"
+
+	install -d "$pkgdir/usr/share/icons"
+	cp -R assets/app-icon/hicolor "$pkgdir/usr/share/icons/"
+
+	install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/photocraft/LICENSE-MIT"
+	install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/photocraft/LICENSE-APACHE"
+	install -Dm644 ATTRIBUTION.md "$pkgdir/usr/share/licenses/photocraft/ATTRIBUTION.md"
+	# NOTICE carries the third-party attributions the bundled dependencies require.
+	if [ -f NOTICE ]; then
+		install -Dm644 NOTICE "$pkgdir/usr/share/licenses/photocraft/NOTICE"
+	fi
+}
+
+# Without these the .desktop entry and the extra MIME types stay invisible until
+# the next login. Both tools are optdepends, so guard the calls.
+post_install() {
+	if [ -x /usr/bin/update-desktop-database ]; then
+		update-desktop-database -q
+	fi
+	if [ -x /usr/bin/update-mime-database ]; then
+		update-mime-database /usr/share/mime >/dev/null 2>&1
+	fi
+	echo "PhotoCraft $pkgver installed. Start it with: photocraft"
+}

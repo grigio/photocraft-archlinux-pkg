@@ -1,0 +1,255 @@
+name: Build Arch packages
+
+# Every new tag release of upstream automatically produces local pacman
+# packages. `release: published` is the key trigger: it fires the moment a
+# maintainer publishes a release (which is how upstream's own tag releases are
+# cut), so no configuration is needed for future versions.
+#
+# The workflow_dispatch trigger is for backfilling tags that predate this repo
+# or for re-running a build.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: 'Tags to build (one per line). Ignored on release events.'
+        type: string
+        default: |
+          v0.9.0
+          v0.8.2
+          v0.7.0
+          v0.6.0
+          v0.5.0
+          v0.3.0
+          v0.2.0
+          v0.1.1
+          v0.1.1-rc.5
+          v0.1.1-rc.4
+          v0.1.0
+      arches:
+        description: 'Architectures to build. Non-x86_64 run under QEMU and are far slower.'
+        type: string
+        default: |
+          x86_64
+
+permissions:
+  contents: read
+
+env:
+  # Rolling image: always a current Arch userspace, which is what we want since
+  # the packages are consumed on a rolling system. Pin this to a dated tag
+  # (archlinux:base-devel:YYYYMMDD) if you need bit-reproducible output.
+  ARCH_IMAGE: archlinux:base-devel
+
+jobs:
+  # Resolve the build matrix so that both the automatic and the manual trigger
+  # feed the same downstream job.
+  prepare:
+    name: Resolve build matrix
+    runs-on: ubuntu-latest
+    outputs:
+      tags: ${{ steps.resolve.outputs.tags }}
+      arches: ${{ steps.resolve.outputs.arches }}
+    steps:
+      - id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAGS: ${{ inputs.tags }}
+          INPUT_ARCHES: ${{ inputs.arches }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" = "release" ]; then
+            # Only react to upstream releases, not to releases of this repo.
+            tags="$RELEASE_TAG"
+            # Release events build the native architecture only. Cross
+            # architectures are opt-in because this workspace is large enough
+            # that an emulated release build costs many times a native one.
+            arches="x86_64"
+          else
+            tags="$INPUT_TAGS"
+            arches="$INPUT_ARCHES"
+          fi
+
+          # Normalise: drop blanks, de-duplicate, oldest first.
+          tags=$(printf '%s\n' $tags | sed '/^$/d' | sort -u -V)
+          arches=$(printf '%s\n' $arches | sed '/^$/d' | sort -u)
+
+          [ -n "$tags" ] || { echo "no tags to build" >&2; exit 1; }
+          [ -n "$arches" ] || { echo "no architectures to build" >&2; exit 1; }
+
+          echo "tags:"
+          printf '%s\n' $tags
+          echo "arches:"
+          printf '%s\n' $arches
+
+          json() { printf '%s' "$1" | jq -R -s 'split("\n") | map(select(length > 0))'; }
+
+          {
+            echo "tags=$(json "$tags")"
+            echo "arches=$(json "$arches")"
+          } >>"$GITHUB_OUTPUT"
+
+  # Register binfmt handlers on the host so that the aarch64 and riscv64
+  # containers below run under emulation. This has to happen in a job without a
+  # container, because it modifies the kernel on the runner.
+  qemu:
+    name: Enable QEMU
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64,riscv64
+
+  build:
+    name: ${{ matrix.tag }} / ${{ matrix.arch }}
+    needs: [prepare, qemu]
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.ARCH_IMAGE }}
+    strategy:
+      # One tag or architecture failing must not hide the others.
+      fail-fast: false
+      matrix:
+        tag: ${{ fromJSON(needs.prepare.outputs.tags) }}
+        arch: ${{ fromJSON(needs.prepare.outputs.arches) }}
+    # A cold native build of this workspace is long; emulated ones longer.
+    timeout-minutes: 300
+    env:
+      # Shared, cacheable cargo state. Restored before the build so that a
+      # re-run of a failed job resumes instead of recompiling 27 crates.
+      CARGO_HOME: /cargo
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore cargo cache
+        uses: actions/cache@v4
+        with:
+          path: /cargo
+          key: cargo-${{ matrix.tag }}-${{ matrix.arch }}-${{ hashFiles('packaging/PKGBUILD.in') }}
+          restore-keys: |
+            cargo-${{ matrix.tag }}-${{ matrix.arch }}-
+            cargo-
+
+      - name: Prepare Arch build environment
+        run: |
+          set -euo pipefail
+          pacman -Sy --noconfirm --needed archlinux-keyring
+          pacman -S --noconfirm --needed base-devel fakeroot curl jq
+          # Image ships a pre-made user only for some variants; be explicit.
+          id -u builder >/dev/null 2>&1 || useradd -m -u 1000 builder
+          mkdir -p /repo/out /cargo
+          # The checkout lands in the job's workspace; hand it to the builder
+          # user so makepkg can work unprivileged.
+          chown -R builder:builder "${{ github.workspace }}" /repo /cargo
+          printenv | sort > /tmp/build-env.txt
+          echo "container image: $(pacman -Q archlinux 2>/dev/null || echo unknown)" >> /tmp/build-env.txt
+
+      - name: Build package
+        id: build
+        shell: bash
+        env:
+          TAG: ${{ matrix.tag }}
+          ARCH: ${{ matrix.arch }}
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          set -uo pipefail
+
+          # Run as an unprivileged user; makepkg uses fakeroot internally.
+          # Exit code 2 means upstream has no asset for this tag/arch pair
+          # (e.g. riscv64 before v0.7.0), which is not a failure.
+          su builder -c "cd '$WORKSPACE' && REPO_DIR=/repo/out CARGO_HOME=/cargo \
+            ./packaging/build-package.sh '$TAG' '$ARCH'" >/tmp/build.log 2>&1
+          rc=$?
+
+          cat /tmp/build.log
+
+          if [ "$rc" -eq 2 ]; then
+            echo "::notice::upstream publishes no $ARCH asset for $TAG -- skipping"
+            echo "skipped=true" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          exit "$rc"
+
+      - name: Upload package
+        if: steps.build.outputs.skipped != 'true' && steps.build.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-${{ matrix.tag }}-${{ matrix.arch }}
+          path: |
+            /repo/out/${{ matrix.arch }}/*.pkg.tar.zst
+            /repo/out/${{ matrix.arch }}/*.info
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Build environment snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: env-${{ matrix.tag }}-${{ matrix.arch }}
+          path: /tmp/build-env.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # Collect every produced .pkg.tar.zst and turn each architecture's set into a
+  # signed-able pacman repository database.
+  index:
+    name: Build local repo
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ env.ARCH_IMAGE }}
+    steps:
+      - name: Install pacman tooling
+        run: pacman -Sy --noconfirm --needed pacman curl
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: photocraft-*
+          path: /artifacts
+          merge-multiple: true
+
+      - name: Create repo databases
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /artifacts
+          mkdir -p /repo
+
+          shopt -s nullglob
+          pkgs=(./*.pkg.tar.zst)
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "no packages were produced by the build matrix" >&2
+            exit 1
+          fi
+
+          # Package file names end in <pkgver>-<pkgrel>-<arch>.pkg.tar.zst, so
+          # the architecture can be recovered from the name.
+          for pkg in "${pkgs[@]}"; do
+            name=$(basename "$pkg")
+            arch=${name%.pkg.tar.zst}
+            arch=${arch##*-}
+            mkdir -p "/repo/$arch"
+            mv "$pkg" "/repo/$arch/$name"
+          done
+
+          for arch in /repo/*/; do
+            arch=${arch%/}
+            arch=${arch##*/}
+            echo "::group::repo-add $arch"
+            repo-add -v -f "/repo/$arch/photocraft.db.tar.gz" "/repo/$arch/"*.pkg.tar.zst
+            echo "::endgroup::"
+          done
+
+          echo "=== repository contents ==="
+          ls -1 /repo/*/*.pkg.tar.zst
+          echo "=== databases ==="
+          ls -1 /repo/*/*.db*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photocraft-arch-repo
+          path: /repo
+          retention-days: 90

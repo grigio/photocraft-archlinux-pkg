@@ -1,0 +1,14 @@
+# Local build output
+out/
+*.pkg.tar.zst
+*.pkg.tar.zst.*
+*.info
+PKGBUILD
+src/
+pkg/
+*.log
+
+# Generated repo databases
+*.db
+*.db.tar.gz
+*.files
