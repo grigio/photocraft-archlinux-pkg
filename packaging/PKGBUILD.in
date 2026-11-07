@@ -36,6 +36,8 @@ b2sums=()
 #   cmake      -- aws-lc-sys builds C code
 #   wayland    -- headers plus wayland-scanner, needed by smithay-client-toolkit
 #   git        -- the workspace has git dependencies (craft-libs, pinned revs)
+#   nasm       -- ring crate needs nasm for x86_64 assembly (CPU feature detection,
+#                AES-NI, SHA-NI, big integer arithmetic, X25519/Ed25519)
 makedepends=('rust' 'clang' 'libpipewire' 'cmake' 'wayland' 'git' 'nasm')
 
 # The binaries declare only glibc, libm and libgcc_s as ELF NEEDED entries.
@@ -118,6 +120,9 @@ build() {
 	# profile carries no debuginfo.
 	export CARGO_PROFILE_RELEASE_DEBUG=false
 	export RUSTFLAGS="${RUSTFLAGS//-C debuginfo=2/}"
+	# Use GNU linker (ld.bfd) instead of LLD to avoid ring crate assembly
+	# linking issues with thin LTO on Arch (LLD is default when clang is present).
+	export RUSTFLAGS="${RUSTFLAGS} -Clinker=clang -Clink-arg=-fuse-ld=bfd"
 	echo "RUSTFLAGS='${RUSTFLAGS}' CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG"
 
 	# crates/engine/src/build_info.rs reads these with option_env!(), so they
