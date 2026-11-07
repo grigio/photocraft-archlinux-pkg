@@ -36,7 +36,7 @@ b2sums=()
 #   cmake      -- aws-lc-sys builds C code
 #   wayland    -- headers plus wayland-scanner, needed by smithay-client-toolkit
 #   git        -- the workspace has git dependencies (craft-libs, pinned revs)
-makedepends=('rust' 'clang' 'libpipewire' 'cmake' 'wayland' 'git')
+makedepends=('rust' 'clang' 'libpipewire' 'cmake' 'wayland' 'git' 'nasm')
 
 # The binaries declare only glibc, libm and libgcc_s as ELF NEEDED entries.
 # Everything else (X11/Wayland, xkbcommon, Vulkan/EGL) is resolved with dlopen()
