@@ -119,11 +119,12 @@ build() {
 	# doubles it into an OOM kill on a CI runner. Upstream's own release
 	# profile carries no debuginfo.
 	export CARGO_PROFILE_RELEASE_DEBUG=false
+	# Disable LTO to avoid ring crate assembly linking issues.
+	# ring 0.17.14's assembly symbols get stripped by thin LTO, causing
+	# undefined references to ring_core_0_17_14__* functions.
+	export CARGO_PROFILE_RELEASE_LTO=off
 	export RUSTFLAGS="${RUSTFLAGS//-C debuginfo=2/}"
-	# Use GNU linker (ld.bfd) instead of LLD to avoid ring crate assembly
-	# linking issues with thin LTO on Arch (LLD is default when clang is present).
-	export RUSTFLAGS="${RUSTFLAGS} -Clinker=clang -Clink-arg=-fuse-ld=bfd"
-	echo "RUSTFLAGS='${RUSTFLAGS}' CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG"
+	echo "RUSTFLAGS='${RUSTFLAGS}' CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG CARGO_PROFILE_RELEASE_LTO=$CARGO_PROFILE_RELEASE_LTO"
 
 	# crates/engine/src/build_info.rs reads these with option_env!(), so they
 	# have to be in the environment while rustc runs -- exporting them is not
