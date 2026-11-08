@@ -41,12 +41,15 @@ esac
 # Retry up to 3 times with exponential backoff to handle transient GitHub API errors.
 commit=
 for attempt in 1 2 3; do
+	set +e
 	commit=$(curl -fsSL \
 		-H 'Accept: application/vnd.github+json' \
-		"https://api.github.com/repos/storytold/photocraft/commits/${tag}" |
-		jq -r '.sha // empty')
-	[ -n "$commit" ] && break
-	echo "Attempt $attempt failed, retrying in $((attempt * 5)) seconds..." >&2
+		"https://api.github.com/repos/storytold/photocraft/commits/${tag}" 2>/dev/null |
+		jq -r '.sha // empty' 2>/dev/null)
+	curl_exit=$?
+	set -e
+	[ -n "$commit" ] && [ "$curl_exit" -eq 0 ] && break
+	echo "Attempt $attempt failed (curl exit: $curl_exit), retrying in $((attempt * 5)) seconds..." >&2
 	sleep $((attempt * 5))
 done
 
