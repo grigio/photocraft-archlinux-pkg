@@ -106,7 +106,8 @@ build() {
 	# Keep cargo's state inside the build tree instead of $HOME. Both may be
 	# overridden by the environment (CI caches CARGO_HOME across runs).
 	export CARGO_HOME="${CARGO_HOME:-$srcdir/cargo-home}"
-	export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$srcdir/target}"
+	# Use default CARGO_TARGET_DIR (target/) like upstream does, to avoid
+	# issues with ring crate's build script and custom target directories.
 
 	# makepkg turns on debuginfo when gdb is installed -- and the rust package
 	# pulls gdb in, so it always is here. It does this two ways: by exporting
@@ -162,7 +163,7 @@ build() {
 package() {
 	cd "$srcdir/photocraft-$pkgver"
 
-	local bin="$CARGO_TARGET_DIR/release"
+	local bin="target/release"
 	local app_id=ai.storyteller.photocraft
 
 	install -Dm755 "$bin/photocraft" "$pkgdir/usr/bin/photocraft"
