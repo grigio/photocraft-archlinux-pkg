@@ -127,7 +127,9 @@ build() {
 	# Use GNU linker (ld.bfd) instead of LLD to avoid ring crate assembly
 	# linking issues on Arch (LLD is default when clang is present).
 	export RUSTFLAGS="${RUSTFLAGS} -Clinker=clang -Clink-arg=-fuse-ld=bfd"
-	echo "RUSTFLAGS='${RUSTFLAGS}' CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG CARGO_PROFILE_RELEASE_LTO=$CARGO_PROFILE_RELEASE_LTO"
+	# Ensure nasm is found by ring's build script (cc crate).
+	export NASM=$(which nasm)
+	echo "RUSTFLAGS='${RUSTFLAGS}' CARGO_PROFILE_RELEASE_DEBUG=$CARGO_PROFILE_RELEASE_DEBUG CARGO_PROFILE_RELEASE_LTO=$CARGO_PROFILE_RELEASE_LTO NASM=$NASM"
 
 	# crates/engine/src/build_info.rs reads these with option_env!(), so they
 	# have to be in the environment while rustc runs -- exporting them is not
