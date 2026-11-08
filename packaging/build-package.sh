@@ -38,13 +38,20 @@ esac
 # assets, not for source tarballs, and GitHub's auto-generated archives are not
 # guaranteed byte-stable -- so the tag is cloned and its commit verified in the
 # PKGBUILD's prepare() instead.
-commit=$(curl -fsSL \
-	-H 'Accept: application/vnd.github+json' \
-	"https://api.github.com/repos/storytold/photocraft/commits/${tag}" |
-	jq -r '.sha // empty')
+# Retry up to 3 times with exponential backoff to handle transient GitHub API errors.
+commit=
+for attempt in 1 2 3; do
+	commit=$(curl -fsSL \
+		-H 'Accept: application/vnd.github+json' \
+		"https://api.github.com/repos/storytold/photocraft/commits/${tag}" |
+		jq -r '.sha // empty')
+	[ -n "$commit" ] && break
+	echo "Attempt $attempt failed, retrying in $((attempt * 5)) seconds..." >&2
+	sleep $((attempt * 5))
+done
 
 if [ -z "$commit" ]; then
-	echo "'$tag' does not resolve to an upstream commit" >&2
+	echo "'$tag' does not resolve to an upstream commit after 3 attempts" >&2
 	exit 2 # exit 2 lets the caller skip it without failing the matrix
 fi
 
