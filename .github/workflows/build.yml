@@ -162,8 +162,13 @@ jobs:
       - name: Prepare Arch build environment
         run: |
           set -euo pipefail
-          pacman -Sy --noconfirm --needed archlinux-keyring
-          pacman -S --noconfirm --needed base-devel fakeroot curl jq
+          # The container is a snapshot of a rolling distro, so its packages can
+          # be older than what the freshly synced repos now ship. Always do a
+          # FULL upgrade (`-u`), never a partial one: a plain `pacman -S` pulls
+          # the new openssl in on its own without upgrading its reverse
+          # dependencies (cryptsetup, libarchive, sudo, pacman, ...), which then
+          # fail with "breaks dependency 'libcrypto.so=3-64'".
+          pacman -Syu --noconfirm --needed archlinux-keyring base-devel fakeroot curl jq
           # Image ships a pre-made user only for some variants; be explicit.
           id -u builder >/dev/null 2>&1 || useradd -m -u 1000 builder
           # makepkg --syncdeps installs the PKGBUILD's makedepends through
@@ -326,7 +331,9 @@ jobs:
       image: archlinux:base-devel
     steps:
       - name: Install pacman tooling
-        run: pacman -Sy --noconfirm --needed pacman curl
+        # Same rolling-image caveat as the build job: a plain -S here would
+        # pull in the new openssl without upgrading its reverse dependencies.
+        run: pacman -Syu --noconfirm --needed pacman curl
 
       - uses: actions/download-artifact@v4
         with:
